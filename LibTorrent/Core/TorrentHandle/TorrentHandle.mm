@@ -351,6 +351,16 @@
     _torrentHandle.save_resume_data();
 }
 
+- (void)setPieceDeadline:(NSInteger)pieceIndex deadline:(int)deadline {
+    auto idx = static_cast<lt::piece_index_t>(static_cast<int>(pieceIndex));
+    _torrentHandle.set_piece_deadline(idx, deadline);
+}
+
+- (void)resetPieceDeadline:(NSInteger)pieceIndex {
+    auto idx = static_cast<lt::piece_index_t>(static_cast<int>(pieceIndex));
+    _torrentHandle.reset_piece_deadline(idx);
+}
+
 - (NSArray<FileEntry *> *)filesFromStatus: (lt::torrent_status)stat {
     auto th = _torrentHandle;
     NSMutableArray *results = [[NSMutableArray alloc] init];
@@ -412,7 +422,7 @@
         [results addObject: [[TorrentTracker alloc] initWithAnnounceEntry: tracker from: self]];
     }
 
-    return results;
+    return trackers;
 }
 
 - (void)setFilePriority:(FilePriority)priority at:(NSInteger)fileIndex {
