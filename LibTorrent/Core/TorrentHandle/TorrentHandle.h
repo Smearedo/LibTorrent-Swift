@@ -87,6 +87,9 @@ NS_SWIFT_NAME(TorrentHandle.Snapshot)
 - (void)setFilesPriority:(FilePriority)priority at:(NSArray<NSNumber *> *)fileIndexes;
 - (void)setAllFilesPriority:(FilePriority)priority;
 
+- (void)setPieceDeadline:(NSInteger)pieceIndex deadline:(int)deadline;
+- (void)resetPieceDeadline:(NSInteger)pieceIndex;
+
 - (void)addTracker:(NSString *)url;
 - (void)removeTrackers:(NSArray<NSString *> *)urls;
 - (void)forceReannounce;
