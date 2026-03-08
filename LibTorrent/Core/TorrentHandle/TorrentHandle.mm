@@ -422,7 +422,7 @@
         [results addObject: [[TorrentTracker alloc] initWithAnnounceEntry: tracker from: self]];
     }
 
-    return trackers;
+    return results;
 }
 
 - (void)setFilePriority:(FilePriority)priority at:(NSInteger)fileIndex {
