@@ -540,6 +540,12 @@
         snapshot.storageUUID = [self storageUUID];
         snapshot.isStorageMissing = [self isStorageMissing];
 
+        snapshot.pieceLength = 0;
+        auto ti = _torrentHandle.torrent_file();
+        if (ti != nullptr) {
+            snapshot.pieceLength = ti->piece_length();
+        }
+
         self.snapshot = snapshot;
     } catch(...) {}
 }
