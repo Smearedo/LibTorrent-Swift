@@ -66,6 +66,7 @@ NS_SWIFT_NAME(TorrentHandle.Snapshot)
 @property (readonly, nullable) NSURL* downloadPath;
 @property (readonly, nullable) NSUUID* storageUUID;
 @property (readonly) BOOL isStorageMissing;
+@property (readonly) int pieceLength;
 @end
 
 @interface TorrentHandle : NSObject
