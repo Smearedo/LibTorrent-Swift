@@ -351,6 +351,12 @@
     _torrentHandle.save_resume_data();
 }
 
+- (void)setPiecePriority:(NSInteger)pieceIndex priority:(uint8_t)priority {
+    auto idx = static_cast<lt::piece_index_t>(static_cast<int>(pieceIndex));
+    auto prio = static_cast<lt::download_priority_t>(priority);
+    _torrentHandle.piece_priority(idx, prio);
+}
+
 - (void)setPieceDeadline:(NSInteger)pieceIndex deadline:(int)deadline {
     auto idx = static_cast<lt::piece_index_t>(static_cast<int>(pieceIndex));
     _torrentHandle.set_piece_deadline(idx, deadline);
