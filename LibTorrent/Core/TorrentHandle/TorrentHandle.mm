@@ -361,6 +361,19 @@
     _torrentHandle.reset_piece_deadline(idx);
 }
 
+- (void)readPiece:(NSInteger)pieceIndex {
+    auto idx = static_cast<lt::piece_index_t>(static_cast<int>(pieceIndex));
+    _torrentHandle.read_piece(idx);
+}
+
+- (void)flushCache {
+    _torrentHandle.flush_cache();
+}
+
+- (void)forceRecheck {
+    _torrentHandle.force_recheck();
+}
+
 - (NSArray<FileEntry *> *)filesFromStatus: (lt::torrent_status)stat {
     auto th = _torrentHandle;
     NSMutableArray *results = [[NSMutableArray alloc] init];
