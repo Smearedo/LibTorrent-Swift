@@ -133,6 +133,20 @@ lt::settings_pack::proxy_type_t proxyTypeConverter(SessionSettings *pack) {
 
         // Prioritize partial pieces for faster initial data
         settings.set_bool(lt::settings_pack::prioritize_partial_pieces, true);
+
+        // More aggressive unchoke for faster data from more peers
+        settings.set_int(lt::settings_pack::unchoke_interval, 5);       // default is 15
+        settings.set_int(lt::settings_pack::optimistic_unchoke_interval, 10); // default is 30
+
+        // Minimize disk overhead during streaming
+        settings.set_bool(lt::settings_pack::coalesce_reads, true);
+        settings.set_bool(lt::settings_pack::coalesce_writes, true);
+
+        // Allow more outstanding requests for faster downloads
+        settings.set_int(lt::settings_pack::max_queued_disk_bytes, 8 * 1024 * 1024); // 8 MB disk write queue
+
+        // Faster initial peer connections
+        settings.set_int(lt::settings_pack::connection_speed, 200);  // default is 30, connect to more peers quickly
     }
 
     return settings;

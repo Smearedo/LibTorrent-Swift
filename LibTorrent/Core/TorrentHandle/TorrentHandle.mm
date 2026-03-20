@@ -220,7 +220,7 @@
         return info->total_size();
     }
 
-    return NULL;
+    return 0;
 }
 
 - (uint64_t)totalDoneFromStatus: (lt::torrent_status)ts {
@@ -429,7 +429,7 @@
         const auto fileOffset = files.file_offset(i);
 
         const long long beginIdx = (fileOffset / pieceLength);
-        const long long endIdx = ((fileOffset + fileSize) / pieceLength);
+        const long long endIdx = fileSize > 0 ? ((fileOffset + fileSize - 1) / pieceLength) + 1 : beginIdx;
 
         fileEntry.begin_idx = beginIdx;
         fileEntry.end_idx = endIdx;
@@ -570,6 +570,150 @@
     }
 
     return [results copy];
+}
+
+// MARK: - Streaming Methods
+
+- (void)prepareForStreaming:(NSInteger)fileIndex {
+    if (!_torrentHandle.is_valid()) return;
+
+    auto ti = _torrentHandle.torrent_file();
+    if (ti == nullptr) return;
+
+    auto info = ti.get();
+    auto files = info->files();
+    if (fileIndex < 0 || fileIndex >= files.num_files()) return;
+
+    auto i = static_cast<lt::file_index_t>((int)fileIndex);
+    const int pieceLength = info->piece_length();
+    const auto fileOffset = files.file_offset(i);
+    const auto fileSize = files.file_size(i);
+
+    if (fileSize == 0 || pieceLength == 0) return;
+
+    const int firstPiece = (int)(fileOffset / pieceLength);
+    const int lastPiece = (int)((fileOffset + fileSize - 1) / pieceLength);
+    const int totalFilePieces = lastPiece - firstPiece + 1;
+
+    // Enable sequential download for the torrent
+    _torrentHandle.set_flags(lt::torrent_flags::sequential_download);
+
+    // Set the target file to top priority
+    _torrentHandle.file_priority(i, lt::download_priority_t{7}); // top priority
+
+    // Set all other files to don't-download so we focus on the streaming file
+    for (int f = 0; f < files.num_files(); f++) {
+        if (f != fileIndex) {
+            _torrentHandle.file_priority(static_cast<lt::file_index_t>(f), lt::download_priority_t{0});
+        }
+    }
+
+    // Aggressively prioritize initial pieces for fast playback start
+    // Use a "head window" of pieces with tight deadlines
+    const int headWindow = std::min(totalFilePieces, std::max(16, (int)(2 * 1024 * 1024 / pieceLength))); // At least 2MB worth
+    const int tailWindow = std::min(4, totalFilePieces); // Last few pieces for container metadata (mp4 moov atom etc)
+
+    for (int p = firstPiece; p <= lastPiece; p++) {
+        auto idx = static_cast<lt::piece_index_t>(p);
+        int relPiece = p - firstPiece;
+
+        if (relPiece < headWindow) {
+            // Head pieces: highest priority with tight deadline
+            _torrentHandle.piece_priority(idx, lt::download_priority_t{7});
+            _torrentHandle.set_piece_deadline(idx, relPiece * 10); // 10ms between each piece deadline
+        } else if (relPiece >= totalFilePieces - tailWindow) {
+            // Tail pieces: high priority for container metadata
+            _torrentHandle.piece_priority(idx, lt::download_priority_t{7});
+            _torrentHandle.set_piece_deadline(idx, headWindow * 10 + (relPiece - (totalFilePieces - tailWindow)) * 10);
+        } else {
+            // Middle pieces: normal priority, sequential will handle order
+            _torrentHandle.piece_priority(idx, lt::download_priority_t{4});
+        }
+    }
+
+    _filesCacheDirty = YES;
+    _torrentHandle.save_resume_data();
+}
+
+- (void)setStreamingPiecePriorities:(NSInteger)fileIndex offset:(uint64_t)byteOffset {
+    if (!_torrentHandle.is_valid()) return;
+
+    auto ti = _torrentHandle.torrent_file();
+    if (ti == nullptr) return;
+
+    auto info = ti.get();
+    auto files = info->files();
+    if (fileIndex < 0 || fileIndex >= files.num_files()) return;
+
+    auto i = static_cast<lt::file_index_t>((int)fileIndex);
+    const int pieceLength = info->piece_length();
+    const auto fileOffset = files.file_offset(i);
+    const auto fileSize = files.file_size(i);
+
+    if (fileSize == 0 || pieceLength == 0) return;
+
+    const int firstPiece = (int)(fileOffset / pieceLength);
+    const int lastPiece = (int)((fileOffset + fileSize - 1) / pieceLength);
+
+    // Calculate the piece corresponding to the current byte offset within the file
+    const int currentPiece = (int)((fileOffset + byteOffset) / pieceLength);
+
+    if (currentPiece < firstPiece || currentPiece > lastPiece) return;
+
+    // Sliding window: prioritize pieces ahead of the playback position
+    // Window size: enough for ~5 seconds of buffering at typical video bitrates
+    const int windowSize = std::min(lastPiece - currentPiece + 1, std::max(32, (int)(8 * 1024 * 1024 / pieceLength))); // At least 8MB ahead
+
+    // Also keep tail pieces prioritized for container metadata
+    const int tailWindow = std::min(4, lastPiece - firstPiece + 1);
+
+    for (int p = firstPiece; p <= lastPiece; p++) {
+        auto idx = static_cast<lt::piece_index_t>(p);
+        int aheadOfCurrent = p - currentPiece;
+
+        if (aheadOfCurrent >= 0 && aheadOfCurrent < windowSize) {
+            // Pieces in the streaming window: highest priority with tight deadlines
+            _torrentHandle.piece_priority(idx, lt::download_priority_t{7});
+            _torrentHandle.set_piece_deadline(idx, aheadOfCurrent * 20); // 20ms increments
+        } else if (p > lastPiece - tailWindow) {
+            // Keep tail pieces at high priority
+            _torrentHandle.piece_priority(idx, lt::download_priority_t{6});
+        } else if (p < currentPiece) {
+            // Already-played pieces: low priority
+            _torrentHandle.piece_priority(idx, lt::download_priority_t{1});
+        } else {
+            // Far-ahead pieces: normal priority
+            _torrentHandle.piece_priority(idx, lt::download_priority_t{4});
+        }
+    }
+}
+
+- (void)clearStreamingPriorities {
+    if (!_torrentHandle.is_valid()) return;
+
+    auto ti = _torrentHandle.torrent_file();
+    if (ti == nullptr) return;
+
+    auto info = ti.get();
+    const int numPieces = info->num_pieces();
+
+    // Reset all piece priorities to default
+    for (int p = 0; p < numPieces; p++) {
+        auto idx = static_cast<lt::piece_index_t>(p);
+        _torrentHandle.piece_priority(idx, lt::download_priority_t{4});
+        _torrentHandle.reset_piece_deadline(idx);
+    }
+
+    // Disable sequential download
+    _torrentHandle.unset_flags(lt::torrent_flags::sequential_download);
+
+    // Reset all file priorities to default
+    for (int f = 0; f < info->files().num_files(); f++) {
+        _torrentHandle.file_priority(static_cast<lt::file_index_t>(f), lt::download_priority_t{4});
+    }
+
+    _filesCacheDirty = YES;
+    _torrentHandle.save_resume_data();
 }
 
 - (void)updateSnapshot {

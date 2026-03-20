@@ -112,6 +112,17 @@ NS_SWIFT_NAME(TorrentHandle.Snapshot)
 
 - (NSArray<PeerInfo *> *)peerInfo;
 
+/// Prepare a file for streaming: enables sequential download, sets the file priority to top,
+/// and aggressively prioritizes the first pieces near the beginning of the file for fast playback start.
+- (void)prepareForStreaming:(NSInteger)fileIndex;
+
+/// Set a sliding window of high-priority pieces with tight deadlines near the given byte offset
+/// within the specified file, for responsive streaming. Call this as the playback position advances.
+- (void)setStreamingPiecePriorities:(NSInteger)fileIndex offset:(uint64_t)byteOffset;
+
+/// Reset all piece priorities and deadlines to normal (call when streaming ends).
+- (void)clearStreamingPriorities;
+
 - (void)updateSnapshot;
 @end
 
