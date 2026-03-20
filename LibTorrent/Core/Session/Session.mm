@@ -188,6 +188,13 @@ static NSString *FileEntriesQueueIdentifier = @"ru.xitrix.TorrentKit.Session.fil
 
     params.storage_mode = _settings.preallocateStorage ? lt::storage_mode_allocate : lt::storage_mode_sparse;
 
+    // Inject default trackers for improved peer discovery (matching hayase ANNOUNCE list)
+    if (_defaultTrackers != nil) {
+        for (NSString *trackerUrl in _defaultTrackers) {
+            params.trackers.push_back(trackerUrl.UTF8String);
+        }
+    }
+
     try {
         auto th = _session->add_torrent(params);
         auto torrentHandle = [[TorrentHandle alloc] initWith:th inSession:self];

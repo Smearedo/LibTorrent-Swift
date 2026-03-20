@@ -10,6 +10,7 @@
 #import <LibTorrent/TorrentHandleState.h>
 #import <LibTorrent/TorrentTracker.h>
 #import <LibTorrent/FileEntry.h>
+#import <LibTorrent/PeerInfo.h>
 
 NS_ASSUME_NONNULL_BEGIN
 
@@ -67,6 +68,13 @@ NS_SWIFT_NAME(TorrentHandle.Snapshot)
 @property (readonly, nullable) NSUUID* storageUUID;
 @property (readonly) BOOL isStorageMissing;
 @property (readonly) int pieceLength;
+@property (readonly) NSInteger numberOfPieces;
+@property (readonly) NSInteger timeRemaining;
+@property (readonly) NSUInteger numberOfConnectedPeers;
+@property (readonly) BOOL isDhtRunning;
+@property (readonly) BOOL isLsdRunning;
+@property (readonly) BOOL isPexEnabled;
+@property (readonly) BOOL hasIncomingConnections;
 @end
 
 @interface TorrentHandle : NSObject
@@ -101,6 +109,8 @@ NS_SWIFT_NAME(TorrentHandle.Snapshot)
 - (void)removeTrackers:(NSArray<NSString *> *)urls;
 - (void)forceReannounce;
 - (void)forceReannounce:(int)index;
+
+- (NSArray<PeerInfo *> *)peerInfo;
 
 - (void)updateSnapshot;
 @end

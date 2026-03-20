@@ -9,12 +9,14 @@
 #import "FileEntry_Internal.h"
 #import "TorrentTracker_Internal.h"
 #import "Session_Internal.h"
+#import "PeerInfo_Internal.h"
 
 #import "NSData+Hex.h"
 
 #import "libtorrent/torrent_status.hpp"
 #import "libtorrent/torrent_info.hpp"
 #import "libtorrent/magnet_uri.hpp"
+#import "libtorrent/peer_info.hpp"
 
 @implementation TorrentHashes
 
@@ -419,6 +421,7 @@
         fileEntry.path = [NSString stringWithUTF8String:path.c_str()];
         fileEntry.size = size;
         fileEntry.downloaded = progresses[index];
+        fileEntry.progress = (size > 0) ? ((double)progresses[index] / (double)size) : 0.0;
         fileEntry.priority = (FilePriority) priority;
 
         const auto fileSize = files.file_size(i);// > 0 ? files.file_size(i) : 0;
@@ -508,6 +511,66 @@
     _torrentHandle.force_reannounce(0, index);
 }
 
+- (NSArray<PeerInfo *> *)peerInfo {
+    if (!_torrentHandle.is_valid()) return @[];
+
+    std::vector<lt::peer_info> peers;
+    try {
+        _torrentHandle.get_peer_info(peers);
+    } catch(...) {
+        return @[];
+    }
+
+    NSMutableArray<PeerInfo *> *results = [[NSMutableArray alloc] initWithCapacity:peers.size()];
+
+    for (const auto &peer : peers) {
+        PeerInfo *info = [[PeerInfo alloc] init];
+
+        // IP address with port
+        auto ep = peer.ip;
+        std::string addr = ep.address().to_string() + ":" + std::to_string(ep.port());
+        info.ip = [NSString stringWithUTF8String:addr.c_str()];
+
+        info.isSeeder = (peer.flags & lt::peer_info::seed) != 0;
+
+        // Client identification
+        std::string clientStr(peer.client.begin(), peer.client.end());
+        info.client = [NSString stringWithUTF8String:clientStr.c_str()];
+
+        // Peer progress
+        info.progress = peer.progress;
+
+        // Transfer stats
+        info.totalDownload = peer.total_download;
+        info.totalUpload = peer.total_upload;
+        info.downloadSpeed = peer.down_speed;
+        info.uploadSpeed = peer.up_speed;
+
+        // Connection flags (matching hayase: incoming, outgoing, utp, encrypted)
+        NSMutableArray<NSString *> *flags = [[NSMutableArray alloc] init];
+
+        if (peer.flags & lt::peer_info::utp_socket) {
+            [flags addObject:@"utp"];
+        }
+
+        if (peer.source & lt::peer_info::incoming) {
+            [flags addObject:@"incoming"];
+        } else {
+            [flags addObject:@"outgoing"];
+        }
+
+        if (peer.flags & lt::peer_info::rc4_encrypted) {
+            [flags addObject:@"encrypted"];
+        }
+
+        info.connectionFlags = [flags copy];
+
+        [results addObject:info];
+    }
+
+    return [results copy];
+}
+
 - (void)updateSnapshot {
     if (!self.isValid) return;
 
@@ -578,10 +641,31 @@
         snapshot.isStorageMissing = [self isStorageMissing];
 
         snapshot.pieceLength = 0;
+        snapshot.numberOfPieces = 0;
         auto ti = _torrentHandle.torrent_file();
         if (ti != nullptr) {
             snapshot.pieceLength = ti->piece_length();
+            snapshot.numberOfPieces = ti->num_pieces();
         }
+
+        // Time remaining calculation (matching hayase's timeRemaining)
+        if (stat.download_rate > 0 && stat.total_wanted > stat.total_wanted_done) {
+            snapshot.timeRemaining = (NSInteger)((stat.total_wanted - stat.total_wanted_done) / stat.download_rate);
+        } else if (stat.total_wanted == stat.total_wanted_done) {
+            snapshot.timeRemaining = 0;
+        } else {
+            snapshot.timeRemaining = -1; // unknown
+        }
+
+        // Total connected peers (matching hayase's wires / _peersLength)
+        snapshot.numberOfConnectedPeers = stat.num_connections;
+
+        // Protocol status flags (matching hayase's protocolStatus)
+        auto settings = _session.session->get_settings();
+        snapshot.isDhtRunning = settings.get_bool(lt::settings_pack::enable_dht);
+        snapshot.isLsdRunning = settings.get_bool(lt::settings_pack::enable_lsd);
+        snapshot.isPexEnabled = !(stat.flags & lt::torrent_flags::disable_pex);
+        snapshot.hasIncomingConnections = stat.has_incoming_connections;
 
         _lastSnapshotTotalDone = totalDone;
         _lastSnapshotHasMetadata = hasMetadata;

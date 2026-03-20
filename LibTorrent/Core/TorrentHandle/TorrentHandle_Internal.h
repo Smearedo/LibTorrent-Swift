@@ -62,6 +62,13 @@ NS_ASSUME_NONNULL_BEGIN
 @property (readwrite, nullable) NSUUID* storageUUID;
 @property (readwrite) BOOL isStorageMissing;
 @property (readwrite) int pieceLength;
+@property (readwrite) NSInteger numberOfPieces;
+@property (readwrite) NSInteger timeRemaining;
+@property (readwrite) NSUInteger numberOfConnectedPeers;
+@property (readwrite) BOOL isDhtRunning;
+@property (readwrite) BOOL isLsdRunning;
+@property (readwrite) BOOL isPexEnabled;
+@property (readwrite) BOOL hasIncomingConnections;
 @end
 
 @interface TorrentHandle ()
