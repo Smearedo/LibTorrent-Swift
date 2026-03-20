@@ -73,6 +73,11 @@ NS_ASSUME_NONNULL_BEGIN
 @property (readwrite, nullable) NSUUID* storageUUID;
 @property (readwrite) TorrentHandleSnapshot* snapshot;
 
+@property uint64_t lastSnapshotTotalDone;
+@property BOOL lastSnapshotHasMetadata;
+@property (nullable) NSString *cachedMagnetLink;
+@property (nullable) NSString *cachedTorrentFilePath;
+
 - (instancetype)initWith:(lt::torrent_handle)torrentHandle inSession:(Session *)session;
 @end
 

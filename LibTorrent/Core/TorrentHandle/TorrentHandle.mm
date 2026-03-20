@@ -503,6 +503,11 @@
     try {
         auto stat = _torrentHandle.status();
 
+        BOOL hasMetadata = [self hasMetadataFromStatus:stat];
+        uint64_t totalDone = [self totalDoneFromStatus:stat];
+        BOOL metadataChanged = (hasMetadata != _lastSnapshotHasMetadata);
+        BOOL progressChanged = (totalDone != _lastSnapshotTotalDone);
+
         snapshot.isValid = self.isValid;
         snapshot.infoHashes = self.infoHashes;
         snapshot.name = [self nameFromStatus:stat];
@@ -520,9 +525,9 @@
         snapshot.numberOfTotalLeechers = [self numberOfTotalLeechersFromStatus:stat];
         snapshot.downloadRate = [self downloadRateFromStatus:stat];
         snapshot.uploadRate = [self uploadRateFromStatus:stat];
-        snapshot.hasMetadata = [self hasMetadataFromStatus:stat];
+        snapshot.hasMetadata = hasMetadata;
         snapshot.total = [self totalFromStatus:stat];
-        snapshot.totalDone = [self totalDoneFromStatus:stat];
+        snapshot.totalDone = totalDone;
         snapshot.totalWanted = [self totalWantedFromStatus:stat];
         snapshot.totalWantedDone = [self totalWantedDoneFromStatus:stat];
         snapshot.totalDownload = [self totalDownloadFromStatus:stat];
@@ -531,11 +536,30 @@
         snapshot.isFinished = [self isFinishedFromStatus:stat];
         snapshot.isSeed = [self isSeedFromStatus:stat];
         snapshot.isSequential = [self isSequentialFromStatus:stat];
-        snapshot.pieces = [self piecesFromStatus:stat];
-        snapshot.files = [self filesFromStatus:stat];
+
+        // Only rebuild pieces and files when download progress changes
+        if (progressChanged || metadataChanged || _snapshot == nil) {
+            snapshot.pieces = [self piecesFromStatus:stat];
+            snapshot.files = [self filesFromStatus:stat];
+        } else {
+            snapshot.pieces = _snapshot.pieces;
+            snapshot.files = _snapshot.files;
+        }
+
         snapshot.trackers = [self trackers];
-        snapshot.magnetLink = [self magnetLink];
-        snapshot.torrentFilePath = [self torrentFilePathFromStatus:stat];
+
+        // Cache magnetLink: only regenerate when metadata availability changes
+        if (metadataChanged || _cachedMagnetLink == nil) {
+            _cachedMagnetLink = [self magnetLink];
+        }
+        snapshot.magnetLink = _cachedMagnetLink;
+
+        // Cache torrentFilePath: only regenerate when metadata availability changes
+        if (metadataChanged || _cachedTorrentFilePath == nil) {
+            _cachedTorrentFilePath = [self torrentFilePathFromStatus:stat];
+        }
+        snapshot.torrentFilePath = _cachedTorrentFilePath;
+
         snapshot.downloadPath = [self downloadPathFromStatus:stat];
         snapshot.storageUUID = [self storageUUID];
         snapshot.isStorageMissing = [self isStorageMissing];
@@ -545,6 +569,9 @@
         if (ti != nullptr) {
             snapshot.pieceLength = ti->piece_length();
         }
+
+        _lastSnapshotTotalDone = totalDone;
+        _lastSnapshotHasMetadata = hasMetadata;
 
         self.snapshot = snapshot;
     } catch(...) {}

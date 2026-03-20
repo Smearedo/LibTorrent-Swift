@@ -35,6 +35,7 @@ lt::settings_pack::proxy_type_t proxyTypeConverter(SessionSettings *pack) {
 
     if (self) {
         _preallocateStorage = false;
+        _connectionLimit = 200;
     }
 
     return self;
@@ -100,6 +101,35 @@ lt::settings_pack::proxy_type_t proxyTypeConverter(SessionSettings *pack) {
         settings.set_bool(lt::settings_pack::proxy_peer_connections, _proxyPeerConnections);
         settings.set_bool(lt::settings_pack::proxy_tracker_connections, true);
         settings.set_bool(lt::settings_pack::proxy_hostnames, true);
+    }
+
+    // Connection limit
+    settings.set_int(lt::settings_pack::connections_limit, (int)_connectionLimit);
+
+    // Streaming mode optimizations
+    if (_isStreamingMode) {
+        // Faster piece picking for sequential playback
+        settings.set_int(lt::settings_pack::whole_pieces_threshold, 2);
+
+        // Faster peer timeouts for responsive streaming
+        settings.set_int(lt::settings_pack::request_timeout, 10);
+        settings.set_int(lt::settings_pack::peer_timeout, 20);
+        settings.set_int(lt::settings_pack::peer_connect_timeout, 5);
+
+        // Larger buffer for smoother streaming
+        settings.set_int(lt::settings_pack::send_buffer_watermark, 1 * 1024 * 1024);
+        settings.set_int(lt::settings_pack::send_buffer_low_watermark, 256 * 1024);
+
+        // Disk cache optimizations for streaming
+        settings.set_int(lt::settings_pack::cache_size, 2048);
+        settings.set_int(lt::settings_pack::cache_expiry, 120);
+
+        // Allow more connections per torrent for streaming
+        settings.set_int(lt::settings_pack::max_out_request_queue, 500);
+        settings.set_int(lt::settings_pack::max_peer_recv_buffer_size, 2 * 1024 * 1024);
+
+        // Prioritize partial pieces for faster initial data
+        settings.set_bool(lt::settings_pack::prioritize_partial_pieces, true);
     }
 
     return settings;
