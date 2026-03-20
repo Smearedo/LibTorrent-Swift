@@ -554,10 +554,10 @@
             [flags addObject:@"utp"];
         }
 
-        if (peer.source & lt::peer_info::incoming) {
-            [flags addObject:@"incoming"];
-        } else {
+        if (peer.flags & lt::peer_info::local_connection) {
             [flags addObject:@"outgoing"];
+        } else {
+            [flags addObject:@"incoming"];
         }
 
         if (peer.flags & lt::peer_info::rc4_encrypted) {
