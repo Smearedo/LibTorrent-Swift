@@ -116,17 +116,20 @@ lt::settings_pack::proxy_type_t proxyTypeConverter(SessionSettings *pack) {
         settings.set_int(lt::settings_pack::peer_timeout, 20);
         settings.set_int(lt::settings_pack::peer_connect_timeout, 5);
 
-        // Larger buffer for smoother streaming
-        settings.set_int(lt::settings_pack::send_buffer_watermark, 1 * 1024 * 1024);
-        settings.set_int(lt::settings_pack::send_buffer_low_watermark, 256 * 1024);
+        // Larger buffer for smoother streaming (bytes)
+        const int sendBufferWatermark = 1 * 1024 * 1024;     // 1 MB
+        const int sendBufferLowWatermark = 256 * 1024;        // 256 KB
+        settings.set_int(lt::settings_pack::send_buffer_watermark, sendBufferWatermark);
+        settings.set_int(lt::settings_pack::send_buffer_low_watermark, sendBufferLowWatermark);
 
-        // Disk cache optimizations for streaming
-        settings.set_int(lt::settings_pack::cache_size, 2048);
+        // Disk cache optimizations for streaming (in 16 KiB blocks)
+        settings.set_int(lt::settings_pack::cache_size, 2048);    // 2048 blocks = 32 MB
         settings.set_int(lt::settings_pack::cache_expiry, 120);
 
         // Allow more connections per torrent for streaming
         settings.set_int(lt::settings_pack::max_out_request_queue, 500);
-        settings.set_int(lt::settings_pack::max_peer_recv_buffer_size, 2 * 1024 * 1024);
+        const int maxPeerRecvBuffer = 2 * 1024 * 1024;       // 2 MB
+        settings.set_int(lt::settings_pack::max_peer_recv_buffer_size, maxPeerRecvBuffer);
 
         // Prioritize partial pieces for faster initial data
         settings.set_bool(lt::settings_pack::prioritize_partial_pieces, true);

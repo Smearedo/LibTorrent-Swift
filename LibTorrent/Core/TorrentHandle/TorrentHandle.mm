@@ -538,7 +538,7 @@
         snapshot.isSequential = [self isSequentialFromStatus:stat];
 
         // Only rebuild pieces and files when download progress changes
-        if (progressChanged || metadataChanged || _snapshot == nil) {
+        if (_snapshot == nil || progressChanged || metadataChanged) {
             snapshot.pieces = [self piecesFromStatus:stat];
             snapshot.files = [self filesFromStatus:stat];
         } else {
