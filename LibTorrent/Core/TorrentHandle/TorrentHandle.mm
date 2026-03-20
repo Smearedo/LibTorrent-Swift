@@ -534,9 +534,9 @@
 
         info.isSeeder = (peer.flags & lt::peer_info::seed) != 0;
 
-        // Client identification
-        std::string clientStr(peer.client.begin(), peer.client.end());
-        info.client = [NSString stringWithUTF8String:clientStr.c_str()];
+        // Client identification (guard against non-UTF8 client strings from malicious peers)
+        NSString *clientName = [NSString stringWithUTF8String:peer.client.c_str()];
+        info.client = clientName ?: @"Unknown";
 
         // Peer progress
         info.progress = peer.progress;
