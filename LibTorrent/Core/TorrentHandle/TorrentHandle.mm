@@ -421,7 +421,8 @@
         fileEntry.path = [NSString stringWithUTF8String:path.c_str()];
         fileEntry.size = size;
         fileEntry.downloaded = progresses[index];
-        fileEntry.progress = (size > 0) ? ((double)progresses[index] / (double)size) : 0.0;
+        double fileProgress = (size > 0) ? ((double)progresses[index] / (double)size) : 0.0;
+        fileEntry.progress = (fileProgress > 1.0) ? 1.0 : fileProgress;
         fileEntry.priority = (FilePriority) priority;
 
         const auto fileSize = files.file_size(i);// > 0 ? files.file_size(i) : 0;
@@ -650,7 +651,7 @@
 
         // Time remaining calculation (matching hayase's timeRemaining)
         if (stat.download_rate > 0 && stat.total_wanted > stat.total_wanted_done) {
-            snapshot.timeRemaining = (NSInteger)((stat.total_wanted - stat.total_wanted_done) / stat.download_rate);
+            snapshot.timeRemaining = (NSInteger)(((double)(stat.total_wanted - stat.total_wanted_done)) / stat.download_rate);
         } else if (stat.total_wanted == stat.total_wanted_done) {
             snapshot.timeRemaining = 0;
         } else {
