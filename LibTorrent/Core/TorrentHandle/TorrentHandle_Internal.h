@@ -75,6 +75,7 @@ NS_ASSUME_NONNULL_BEGIN
 
 @property uint64_t lastSnapshotTotalDone;
 @property BOOL lastSnapshotHasMetadata;
+@property BOOL filesCacheDirty;
 @property (nullable) NSString *cachedMagnetLink;
 @property (nullable) NSString *cachedTorrentFilePath;
 

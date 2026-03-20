@@ -64,9 +64,25 @@ NSDate* fromLTTimePoint32(const lt::time_point32 &timePoint)
                 status.name = [[NSString alloc] initWithUTF8String:endpointName.c_str()];
                 status.btVersion = protocolVersion;
 
-                auto peersStorage = torrentHandle.session.updatedTrackerStatuses[hash][announceEntry.url][endpoint.local_endpoint];
-                if (peersStorage.find(protocolVersion) != peersStorage.end()) {
-                    status.peers = peersStorage[protocolVersion];
+                auto& trackerStatuses = torrentHandle.session.updatedTrackerStatuses;
+                auto hashIt = trackerStatuses.find(hash);
+                if (hashIt != trackerStatuses.end()) {
+                    auto urlIt = hashIt->second.find(announceEntry.url);
+                    if (urlIt != hashIt->second.end()) {
+                        auto epIt = urlIt->second.find(endpoint.local_endpoint);
+                        if (epIt != urlIt->second.end()) {
+                            auto pvIt = epIt->second.find(protocolVersion);
+                            if (pvIt != epIt->second.end()) {
+                                status.peers = pvIt->second;
+                            } else {
+                                status.peers = -1;
+                            }
+                        } else {
+                            status.peers = -1;
+                        }
+                    } else {
+                        status.peers = -1;
+                    }
                 } else {
                     status.peers = -1;
                 }

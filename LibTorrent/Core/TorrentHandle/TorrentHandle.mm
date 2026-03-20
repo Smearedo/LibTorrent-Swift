@@ -337,6 +337,15 @@
     _session.session->remove_torrent(_torrentHandle);
     auto newTorrentHandle = [_session addTorrent: torrentFile];
     _torrentHandle = newTorrentHandle.torrentHandle;
+
+    // Invalidate all caches since the underlying handle has been replaced
+    _snapshot = nil;
+    _cachedMagnetLink = nil;
+    _cachedTorrentFilePath = nil;
+    _lastSnapshotTotalDone = 0;
+    _lastSnapshotHasMetadata = NO;
+    _filesCacheDirty = YES;
+
     [self updateSnapshot];
 }
 
@@ -449,6 +458,7 @@
     auto ltPriority = static_cast<lt::download_priority_t>(priority);
 
     _torrentHandle.file_priority(std::move(ltIndex), std::move(ltPriority));
+    _filesCacheDirty = YES;
     _torrentHandle.save_resume_data();
 }
 
@@ -459,6 +469,7 @@
         priorities[index] = static_cast<lt::download_priority_t>(priority);
     }
     _torrentHandle.prioritize_files(priorities);
+    _filesCacheDirty = YES;
     _torrentHandle.save_resume_data();
 }
 
@@ -468,6 +479,7 @@
         array.push_back(static_cast<lt::download_priority_t>(priority));
     }
     _torrentHandle.prioritize_files(array);
+    _filesCacheDirty = YES;
     _torrentHandle.save_resume_data();
 }
 
@@ -537,10 +549,11 @@
         snapshot.isSeed = [self isSeedFromStatus:stat];
         snapshot.isSequential = [self isSequentialFromStatus:stat];
 
-        // Only rebuild pieces and files when download progress changes
-        if (_snapshot == nil || progressChanged || metadataChanged) {
+        // Only rebuild pieces and files when download progress or priorities change
+        if (_snapshot == nil || progressChanged || metadataChanged || _filesCacheDirty) {
             snapshot.pieces = [self piecesFromStatus:stat];
             snapshot.files = [self filesFromStatus:stat];
+            _filesCacheDirty = NO;
         } else {
             snapshot.pieces = _snapshot.pieces;
             snapshot.files = _snapshot.files;
