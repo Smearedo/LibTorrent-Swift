@@ -35,6 +35,7 @@ lt::settings_pack::proxy_type_t proxyTypeConverter(SessionSettings *pack) {
 
     if (self) {
         _preallocateStorage = false;
+        _connectionLimit = 200;
     }
 
     return self;
@@ -100,6 +101,52 @@ lt::settings_pack::proxy_type_t proxyTypeConverter(SessionSettings *pack) {
         settings.set_bool(lt::settings_pack::proxy_peer_connections, _proxyPeerConnections);
         settings.set_bool(lt::settings_pack::proxy_tracker_connections, true);
         settings.set_bool(lt::settings_pack::proxy_hostnames, true);
+    }
+
+    // Connection limit
+    settings.set_int(lt::settings_pack::connections_limit, (int)_connectionLimit);
+
+    // Streaming mode optimizations
+    if (_isStreamingMode) {
+        // Faster piece picking for sequential playback
+        settings.set_int(lt::settings_pack::whole_pieces_threshold, 2);
+
+        // Faster peer timeouts for responsive streaming
+        settings.set_int(lt::settings_pack::request_timeout, 10);
+        settings.set_int(lt::settings_pack::peer_timeout, 20);
+        settings.set_int(lt::settings_pack::peer_connect_timeout, 5);
+
+        // Larger buffer for smoother streaming (bytes)
+        const int sendBufferWatermark = 1 * 1024 * 1024;     // 1 MB
+        const int sendBufferLowWatermark = 256 * 1024;        // 256 KB
+        settings.set_int(lt::settings_pack::send_buffer_watermark, sendBufferWatermark);
+        settings.set_int(lt::settings_pack::send_buffer_low_watermark, sendBufferLowWatermark);
+
+        // Disk cache optimizations for streaming (in 16 KiB blocks)
+        settings.set_int(lt::settings_pack::cache_size, 2048);    // 2048 blocks = 32 MB
+        settings.set_int(lt::settings_pack::cache_expiry, 120);
+
+        // Allow more connections per torrent for streaming
+        settings.set_int(lt::settings_pack::max_out_request_queue, 500);
+        const int maxPeerRecvBuffer = 2 * 1024 * 1024;       // 2 MB
+        settings.set_int(lt::settings_pack::max_peer_recv_buffer_size, maxPeerRecvBuffer);
+
+        // Prioritize partial pieces for faster initial data
+        settings.set_bool(lt::settings_pack::prioritize_partial_pieces, true);
+
+        // More aggressive unchoke for faster data from more peers
+        settings.set_int(lt::settings_pack::unchoke_interval, 5);       // default is 15
+        settings.set_int(lt::settings_pack::optimistic_unchoke_interval, 10); // default is 30
+
+        // Minimize disk overhead during streaming
+        settings.set_bool(lt::settings_pack::coalesce_reads, true);
+        settings.set_bool(lt::settings_pack::coalesce_writes, true);
+
+        // Allow more outstanding requests for faster downloads
+        settings.set_int(lt::settings_pack::max_queued_disk_bytes, 8 * 1024 * 1024); // 8 MB disk write queue
+
+        // Faster initial peer connections
+        settings.set_int(lt::settings_pack::connection_speed, 200);  // default is 30, connect to more peers quickly
     }
 
     return settings;

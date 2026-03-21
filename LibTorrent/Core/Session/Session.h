@@ -53,6 +53,9 @@ typedef NS_ENUM(NSUInteger, ErrorCode) {
 
 @property (readwrite) NSDictionary<NSUUID*, StorageModel*> *storages;
 
+/// Default announce trackers injected into every added torrent for improved peer discovery
+@property (readwrite, strong, nonatomic, nullable) NSArray<NSString *> *defaultTrackers;
+
 - (instancetype)initWith:(NSURL *)downloadPath torrentsPath:(NSURL *)torrentsPath fastResumePath:(NSURL *)fastResumePath settings:(SessionSettings *)settings storages:(NSDictionary<NSUUID*, StorageModel*>*)storages;
 
 - (NSString *)fastResumePathForInfoHashes:(TorrentHashes *)infoHashes;

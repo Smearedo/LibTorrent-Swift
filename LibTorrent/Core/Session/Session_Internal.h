@@ -15,7 +15,9 @@
 
 NS_ASSUME_NONNULL_BEGIN
 
-@interface Session ()
+@interface Session () {
+    std::unordered_map<lt::sha1_hash, std::unordered_map<std::string, std::unordered_map<lt::tcp::endpoint, std::unordered_map<int, int>>>> _updatedTrackerStatuses;
+}
 @property lt::session *session;
 @property (strong, nonatomic) dispatch_queue_t filesQueue;
 @property (strong, nonatomic) NSThread *eventsThread;
@@ -23,7 +25,7 @@ NS_ASSUME_NONNULL_BEGIN
 @property (strong, nonatomic) NSMutableDictionary<TorrentHashes*, TorrentHandle*> *torrentsMap;
 @property (strong, nonatomic, nullable) NSString *lastExternalIP;
 
-- (std::unordered_map<lt::sha1_hash, std::unordered_map<std::string, std::unordered_map<lt::tcp::endpoint, std::unordered_map<int, int>>>>) updatedTrackerStatuses;
+- (std::unordered_map<lt::sha1_hash, std::unordered_map<std::string, std::unordered_map<lt::tcp::endpoint, std::unordered_map<int, int>>>>&) updatedTrackerStatuses;
 @end
 
 NS_ASSUME_NONNULL_END

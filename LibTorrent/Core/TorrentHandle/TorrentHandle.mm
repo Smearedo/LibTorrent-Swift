@@ -9,12 +9,14 @@
 #import "FileEntry_Internal.h"
 #import "TorrentTracker_Internal.h"
 #import "Session_Internal.h"
+#import "PeerInfo_Internal.h"
 
 #import "NSData+Hex.h"
 
 #import "libtorrent/torrent_status.hpp"
 #import "libtorrent/torrent_info.hpp"
 #import "libtorrent/magnet_uri.hpp"
+#import "libtorrent/peer_info.hpp"
 
 @implementation TorrentHashes
 
@@ -218,7 +220,7 @@
         return info->total_size();
     }
 
-    return NULL;
+    return 0;
 }
 
 - (uint64_t)totalDoneFromStatus: (lt::torrent_status)ts {
@@ -337,6 +339,15 @@
     _session.session->remove_torrent(_torrentHandle);
     auto newTorrentHandle = [_session addTorrent: torrentFile];
     _torrentHandle = newTorrentHandle.torrentHandle;
+
+    // Invalidate all caches since the underlying handle has been replaced
+    _snapshot = nil;
+    _cachedMagnetLink = nil;
+    _cachedTorrentFilePath = nil;
+    _lastSnapshotTotalDone = 0;
+    _lastSnapshotHasMetadata = NO;
+    _filesCacheDirty = YES;
+
     [self updateSnapshot];
 }
 
@@ -410,13 +421,15 @@
         fileEntry.path = [NSString stringWithUTF8String:path.c_str()];
         fileEntry.size = size;
         fileEntry.downloaded = progresses[index];
+        double fileProgress = (size > 0) ? ((double)progresses[index] / (double)size) : 0.0;
+        fileEntry.progress = (fileProgress > 1.0) ? 1.0 : fileProgress;
         fileEntry.priority = (FilePriority) priority;
 
         const auto fileSize = files.file_size(i);// > 0 ? files.file_size(i) : 0;
         const auto fileOffset = files.file_offset(i);
 
         const long long beginIdx = (fileOffset / pieceLength);
-        const long long endIdx = ((fileOffset + fileSize) / pieceLength);
+        const long long endIdx = fileSize > 0 ? ((fileOffset + fileSize - 1) / pieceLength) + 1 : beginIdx;
 
         fileEntry.begin_idx = beginIdx;
         fileEntry.end_idx = endIdx;
@@ -449,6 +462,7 @@
     auto ltPriority = static_cast<lt::download_priority_t>(priority);
 
     _torrentHandle.file_priority(std::move(ltIndex), std::move(ltPriority));
+    _filesCacheDirty = YES;
     _torrentHandle.save_resume_data();
 }
 
@@ -459,6 +473,7 @@
         priorities[index] = static_cast<lt::download_priority_t>(priority);
     }
     _torrentHandle.prioritize_files(priorities);
+    _filesCacheDirty = YES;
     _torrentHandle.save_resume_data();
 }
 
@@ -468,6 +483,7 @@
         array.push_back(static_cast<lt::download_priority_t>(priority));
     }
     _torrentHandle.prioritize_files(array);
+    _filesCacheDirty = YES;
     _torrentHandle.save_resume_data();
 }
 
@@ -496,12 +512,221 @@
     _torrentHandle.force_reannounce(0, index);
 }
 
+- (NSArray<PeerInfo *> *)peerInfo {
+    if (!_torrentHandle.is_valid()) return @[];
+
+    std::vector<lt::peer_info> peers;
+    try {
+        _torrentHandle.get_peer_info(peers);
+    } catch(...) {
+        return @[];
+    }
+
+    NSMutableArray<PeerInfo *> *results = [[NSMutableArray alloc] initWithCapacity:peers.size()];
+
+    for (const auto &peer : peers) {
+        PeerInfo *info = [[PeerInfo alloc] init];
+
+        // IP address with port
+        auto ep = peer.ip;
+        std::string addr = ep.address().to_string() + ":" + std::to_string(ep.port());
+        info.ip = [NSString stringWithUTF8String:addr.c_str()];
+
+        info.isSeeder = (peer.flags & lt::peer_info::seed) != 0;
+
+        // Client identification (guard against non-UTF8 client strings from malicious peers)
+        NSString *clientName = [NSString stringWithUTF8String:peer.client.c_str()];
+        info.client = clientName ?: @"Unknown";
+
+        // Peer progress
+        info.progress = peer.progress;
+
+        // Transfer stats
+        info.totalDownload = peer.total_download;
+        info.totalUpload = peer.total_upload;
+        info.downloadSpeed = peer.down_speed;
+        info.uploadSpeed = peer.up_speed;
+
+        // Connection flags (matching hayase: incoming, outgoing, utp, encrypted)
+        NSMutableArray<NSString *> *flags = [[NSMutableArray alloc] init];
+
+        if (peer.flags & lt::peer_info::utp_socket) {
+            [flags addObject:@"utp"];
+        }
+
+        if (peer.flags & lt::peer_info::local_connection) {
+            [flags addObject:@"outgoing"];
+        } else {
+            [flags addObject:@"incoming"];
+        }
+
+        if (peer.flags & lt::peer_info::rc4_encrypted) {
+            [flags addObject:@"encrypted"];
+        }
+
+        info.connectionFlags = [flags copy];
+
+        [results addObject:info];
+    }
+
+    return [results copy];
+}
+
+// MARK: - Streaming Methods
+
+- (void)prepareForStreaming:(NSInteger)fileIndex {
+    if (!_torrentHandle.is_valid()) return;
+
+    auto ti = _torrentHandle.torrent_file();
+    if (ti == nullptr) return;
+
+    auto info = ti.get();
+    auto files = info->files();
+    if (fileIndex < 0 || fileIndex >= files.num_files()) return;
+
+    auto i = static_cast<lt::file_index_t>((int)fileIndex);
+    const int pieceLength = info->piece_length();
+    const auto fileOffset = files.file_offset(i);
+    const auto fileSize = files.file_size(i);
+
+    if (fileSize == 0 || pieceLength == 0) return;
+
+    const int firstPiece = (int)(fileOffset / pieceLength);
+    const int lastPiece = (int)((fileOffset + fileSize - 1) / pieceLength);
+    const int totalFilePieces = lastPiece - firstPiece + 1;
+
+    // Enable sequential download for the torrent
+    _torrentHandle.set_flags(lt::torrent_flags::sequential_download);
+
+    // Set the target file to top priority
+    _torrentHandle.file_priority(i, lt::download_priority_t{7}); // top priority
+
+    // Set all other files to don't-download so we focus on the streaming file
+    for (int f = 0; f < files.num_files(); f++) {
+        if (f != fileIndex) {
+            _torrentHandle.file_priority(static_cast<lt::file_index_t>(f), lt::download_priority_t{0});
+        }
+    }
+
+    // Aggressively prioritize initial pieces for fast playback start
+    // Use a "head window" of pieces with tight deadlines
+    const int headWindow = std::min(totalFilePieces, std::max(16, (int)(2 * 1024 * 1024 / pieceLength))); // At least 2MB worth
+    const int tailWindow = std::min(4, totalFilePieces); // Last few pieces for container metadata (mp4 moov atom etc)
+
+    for (int p = firstPiece; p <= lastPiece; p++) {
+        auto idx = static_cast<lt::piece_index_t>(p);
+        int relPiece = p - firstPiece;
+
+        if (relPiece < headWindow) {
+            // Head pieces: highest priority with tight deadline
+            _torrentHandle.piece_priority(idx, lt::download_priority_t{7});
+            _torrentHandle.set_piece_deadline(idx, relPiece * 10); // 10ms between each piece deadline
+        } else if (relPiece >= totalFilePieces - tailWindow) {
+            // Tail pieces: high priority for container metadata
+            _torrentHandle.piece_priority(idx, lt::download_priority_t{7});
+            _torrentHandle.set_piece_deadline(idx, headWindow * 10 + (relPiece - (totalFilePieces - tailWindow)) * 10);
+        } else {
+            // Middle pieces: normal priority, sequential will handle order
+            _torrentHandle.piece_priority(idx, lt::download_priority_t{4});
+        }
+    }
+
+    _filesCacheDirty = YES;
+    _torrentHandle.save_resume_data();
+}
+
+- (void)setStreamingPiecePriorities:(NSInteger)fileIndex offset:(uint64_t)byteOffset {
+    if (!_torrentHandle.is_valid()) return;
+
+    auto ti = _torrentHandle.torrent_file();
+    if (ti == nullptr) return;
+
+    auto info = ti.get();
+    auto files = info->files();
+    if (fileIndex < 0 || fileIndex >= files.num_files()) return;
+
+    auto i = static_cast<lt::file_index_t>((int)fileIndex);
+    const int pieceLength = info->piece_length();
+    const auto fileOffset = files.file_offset(i);
+    const auto fileSize = files.file_size(i);
+
+    if (fileSize == 0 || pieceLength == 0) return;
+
+    const int firstPiece = (int)(fileOffset / pieceLength);
+    const int lastPiece = (int)((fileOffset + fileSize - 1) / pieceLength);
+
+    // Calculate the piece corresponding to the current byte offset within the file
+    const int currentPiece = (int)((fileOffset + byteOffset) / pieceLength);
+
+    if (currentPiece < firstPiece || currentPiece > lastPiece) return;
+
+    // Sliding window: prioritize pieces ahead of the playback position
+    // Window size: enough for ~5 seconds of buffering at typical video bitrates
+    const int windowSize = std::min(lastPiece - currentPiece + 1, std::max(32, (int)(8 * 1024 * 1024 / pieceLength))); // At least 8MB ahead
+
+    // Also keep tail pieces prioritized for container metadata
+    const int tailWindow = std::min(4, lastPiece - firstPiece + 1);
+
+    for (int p = firstPiece; p <= lastPiece; p++) {
+        auto idx = static_cast<lt::piece_index_t>(p);
+        int aheadOfCurrent = p - currentPiece;
+
+        if (aheadOfCurrent >= 0 && aheadOfCurrent < windowSize) {
+            // Pieces in the streaming window: highest priority with tight deadlines
+            _torrentHandle.piece_priority(idx, lt::download_priority_t{7});
+            _torrentHandle.set_piece_deadline(idx, aheadOfCurrent * 20); // 20ms increments
+        } else if (p > lastPiece - tailWindow) {
+            // Keep tail pieces at high priority
+            _torrentHandle.piece_priority(idx, lt::download_priority_t{6});
+        } else if (p < currentPiece) {
+            // Already-played pieces: low priority
+            _torrentHandle.piece_priority(idx, lt::download_priority_t{1});
+        } else {
+            // Far-ahead pieces: normal priority
+            _torrentHandle.piece_priority(idx, lt::download_priority_t{4});
+        }
+    }
+}
+
+- (void)clearStreamingPriorities {
+    if (!_torrentHandle.is_valid()) return;
+
+    auto ti = _torrentHandle.torrent_file();
+    if (ti == nullptr) return;
+
+    auto info = ti.get();
+    const int numPieces = info->num_pieces();
+
+    // Reset all piece priorities to default
+    for (int p = 0; p < numPieces; p++) {
+        auto idx = static_cast<lt::piece_index_t>(p);
+        _torrentHandle.piece_priority(idx, lt::download_priority_t{4});
+        _torrentHandle.reset_piece_deadline(idx);
+    }
+
+    // Disable sequential download
+    _torrentHandle.unset_flags(lt::torrent_flags::sequential_download);
+
+    // Reset all file priorities to default
+    for (int f = 0; f < info->files().num_files(); f++) {
+        _torrentHandle.file_priority(static_cast<lt::file_index_t>(f), lt::download_priority_t{4});
+    }
+
+    _filesCacheDirty = YES;
+    _torrentHandle.save_resume_data();
+}
+
 - (void)updateSnapshot {
     if (!self.isValid) return;
 
     auto snapshot = [[TorrentHandleSnapshot alloc] init];
     try {
         auto stat = _torrentHandle.status();
+
+        BOOL hasMetadata = [self hasMetadataFromStatus:stat];
+        uint64_t totalDone = [self totalDoneFromStatus:stat];
+        BOOL metadataChanged = (hasMetadata != _lastSnapshotHasMetadata);
+        BOOL progressChanged = (totalDone != _lastSnapshotTotalDone);
 
         snapshot.isValid = self.isValid;
         snapshot.infoHashes = self.infoHashes;
@@ -520,9 +745,9 @@
         snapshot.numberOfTotalLeechers = [self numberOfTotalLeechersFromStatus:stat];
         snapshot.downloadRate = [self downloadRateFromStatus:stat];
         snapshot.uploadRate = [self uploadRateFromStatus:stat];
-        snapshot.hasMetadata = [self hasMetadataFromStatus:stat];
+        snapshot.hasMetadata = hasMetadata;
         snapshot.total = [self totalFromStatus:stat];
-        snapshot.totalDone = [self totalDoneFromStatus:stat];
+        snapshot.totalDone = totalDone;
         snapshot.totalWanted = [self totalWantedFromStatus:stat];
         snapshot.totalWantedDone = [self totalWantedDoneFromStatus:stat];
         snapshot.totalDownload = [self totalDownloadFromStatus:stat];
@@ -531,20 +756,64 @@
         snapshot.isFinished = [self isFinishedFromStatus:stat];
         snapshot.isSeed = [self isSeedFromStatus:stat];
         snapshot.isSequential = [self isSequentialFromStatus:stat];
-        snapshot.pieces = [self piecesFromStatus:stat];
-        snapshot.files = [self filesFromStatus:stat];
+
+        // Only rebuild pieces and files when download progress or priorities change
+        if (_snapshot == nil || progressChanged || metadataChanged || _filesCacheDirty) {
+            snapshot.pieces = [self piecesFromStatus:stat];
+            snapshot.files = [self filesFromStatus:stat];
+            _filesCacheDirty = NO;
+        } else {
+            snapshot.pieces = _snapshot.pieces;
+            snapshot.files = _snapshot.files;
+        }
+
         snapshot.trackers = [self trackers];
-        snapshot.magnetLink = [self magnetLink];
-        snapshot.torrentFilePath = [self torrentFilePathFromStatus:stat];
+
+        // Cache magnetLink: only regenerate when metadata availability changes
+        if (metadataChanged || _cachedMagnetLink == nil) {
+            _cachedMagnetLink = [self magnetLink];
+        }
+        snapshot.magnetLink = _cachedMagnetLink;
+
+        // Cache torrentFilePath: only regenerate when metadata availability changes
+        if (metadataChanged || _cachedTorrentFilePath == nil) {
+            _cachedTorrentFilePath = [self torrentFilePathFromStatus:stat];
+        }
+        snapshot.torrentFilePath = _cachedTorrentFilePath;
+
         snapshot.downloadPath = [self downloadPathFromStatus:stat];
         snapshot.storageUUID = [self storageUUID];
         snapshot.isStorageMissing = [self isStorageMissing];
 
         snapshot.pieceLength = 0;
+        snapshot.numberOfPieces = 0;
         auto ti = _torrentHandle.torrent_file();
         if (ti != nullptr) {
             snapshot.pieceLength = ti->piece_length();
+            snapshot.numberOfPieces = ti->num_pieces();
         }
+
+        // Time remaining calculation (matching hayase's timeRemaining)
+        if (stat.download_rate > 0 && stat.total_wanted > stat.total_wanted_done) {
+            snapshot.timeRemaining = (NSInteger)(((double)(stat.total_wanted - stat.total_wanted_done)) / stat.download_rate);
+        } else if (stat.total_wanted == stat.total_wanted_done) {
+            snapshot.timeRemaining = 0;
+        } else {
+            snapshot.timeRemaining = -1; // unknown
+        }
+
+        // Total connected peers (matching hayase's wires / _peersLength)
+        snapshot.numberOfConnectedPeers = stat.num_connections;
+
+        // Protocol status flags (matching hayase's protocolStatus)
+        auto settings = _session.session->get_settings();
+        snapshot.isDhtRunning = settings.get_bool(lt::settings_pack::enable_dht);
+        snapshot.isLsdRunning = settings.get_bool(lt::settings_pack::enable_lsd);
+        snapshot.isPexEnabled = !(stat.flags & lt::torrent_flags::disable_pex);
+        snapshot.hasIncomingConnections = stat.has_incoming_connections;
+
+        _lastSnapshotTotalDone = totalDone;
+        _lastSnapshotHasMetadata = hasMetadata;
 
         self.snapshot = snapshot;
     } catch(...) {}
