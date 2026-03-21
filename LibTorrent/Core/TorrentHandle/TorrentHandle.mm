@@ -532,7 +532,7 @@
         std::string addr = ep.address().to_string() + ":" + std::to_string(ep.port());
         info.ip = [NSString stringWithUTF8String:addr.c_str()];
 
-        info.isSeeder = (peer.flags & lt::peer_info::seed) != 0;
+        info.isSeeder = bool(peer.flags & lt::peer_info::seed);
 
         // Client identification (guard against non-UTF8 client strings from malicious peers)
         NSString *clientName = [NSString stringWithUTF8String:peer.client.c_str()];
@@ -810,7 +810,7 @@
         snapshot.isDhtRunning = settings.get_bool(lt::settings_pack::enable_dht);
         snapshot.isLsdRunning = settings.get_bool(lt::settings_pack::enable_lsd);
         snapshot.isPexEnabled = !(stat.flags & lt::torrent_flags::disable_pex);
-        snapshot.hasIncomingConnections = stat.has_incoming_connections;
+        snapshot.hasIncomingConnections = (stat.num_peers > 0);
 
         _lastSnapshotTotalDone = totalDone;
         _lastSnapshotHasMetadata = hasMetadata;
