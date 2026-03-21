@@ -122,10 +122,6 @@ lt::settings_pack::proxy_type_t proxyTypeConverter(SessionSettings *pack) {
         settings.set_int(lt::settings_pack::send_buffer_watermark, sendBufferWatermark);
         settings.set_int(lt::settings_pack::send_buffer_low_watermark, sendBufferLowWatermark);
 
-        // Disk cache optimizations for streaming (in 16 KiB blocks)
-        settings.set_int(lt::settings_pack::cache_size, 2048);    // 2048 blocks = 32 MB
-        settings.set_int(lt::settings_pack::cache_expiry, 120);
-
         // Allow more connections per torrent for streaming
         settings.set_int(lt::settings_pack::max_out_request_queue, 500);
         const int maxPeerRecvBuffer = 2 * 1024 * 1024;       // 2 MB
@@ -137,10 +133,6 @@ lt::settings_pack::proxy_type_t proxyTypeConverter(SessionSettings *pack) {
         // More aggressive unchoke for faster data from more peers
         settings.set_int(lt::settings_pack::unchoke_interval, 5);       // default is 15
         settings.set_int(lt::settings_pack::optimistic_unchoke_interval, 10); // default is 30
-
-        // Minimize disk overhead during streaming
-        settings.set_bool(lt::settings_pack::coalesce_reads, true);
-        settings.set_bool(lt::settings_pack::coalesce_writes, true);
 
         // Allow more outstanding requests for faster downloads
         settings.set_int(lt::settings_pack::max_queued_disk_bytes, 8 * 1024 * 1024); // 8 MB disk write queue
