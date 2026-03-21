@@ -100,6 +100,7 @@ NS_SWIFT_NAME(TorrentHandle.Snapshot)
 
 - (void)setPieceDeadline:(NSInteger)pieceIndex deadline:(int)deadline;
 - (void)resetPieceDeadline:(NSInteger)pieceIndex;
+- (void)clearPieceDeadlines;
 
 - (void)readPiece:(NSInteger)pieceIndex;
 - (void)flushCache;
