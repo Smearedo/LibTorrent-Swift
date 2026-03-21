@@ -378,6 +378,10 @@
     _torrentHandle.reset_piece_deadline(idx);
 }
 
+- (void)clearPieceDeadlines {
+    _torrentHandle.clear_piece_deadlines();
+}
+
 - (void)readPiece:(NSInteger)pieceIndex {
     auto idx = static_cast<lt::piece_index_t>(static_cast<int>(pieceIndex));
     _torrentHandle.read_piece(idx);
