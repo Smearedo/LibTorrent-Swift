@@ -60,6 +60,9 @@ NS_SWIFT_NAME(Session.Settings)
 @property (readwrite, nonatomic) NSString* proxyPassword;
 @property (readwrite, nonatomic) BOOL proxyPeerConnections;
 
+@property (readwrite, nonatomic) BOOL isStreamingMode;
+@property (readwrite, nonatomic) NSInteger connectionLimit;
+
 @end
 
 NS_ASSUME_NONNULL_END

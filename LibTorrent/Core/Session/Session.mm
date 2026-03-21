@@ -44,8 +44,6 @@ static NSString *FileEntriesQueueIdentifier = @"ru.xitrix.TorrentKit.Session.fil
 
 @implementation Session : NSObject
 
-std::unordered_map<lt::sha1_hash, std::unordered_map<std::string, std::unordered_map<lt::tcp::endpoint, std::unordered_map<int, int>>>> updatedTrackerStatuses;
-
 // MARK: - Init
 - (instancetype)initWith:(NSURL *)downloadPath torrentsPath:(NSURL *)torrentsPath fastResumePath:(NSURL *)fastResumePath settings:(SessionSettings *)settings storages:(NSDictionary<NSUUID*, StorageModel*>*)storages {
     self = [super init];
@@ -79,7 +77,7 @@ std::unordered_map<lt::sha1_hash, std::unordered_map<std::string, std::unordered
         // start alerts loop
         _eventsThread = [[NSThread alloc] initWithTarget:self selector:@selector(alertsLoop) object:nil];
         [_eventsThread setName: EventsQueueIdentifier];
-        [_eventsThread setQualityOfService:NSQualityOfServiceDefault];
+        [_eventsThread setQualityOfService:NSQualityOfServiceUserInitiated];
         [_eventsThread start];
 
     }
@@ -190,6 +188,13 @@ std::unordered_map<lt::sha1_hash, std::unordered_map<std::string, std::unordered
 
     params.storage_mode = _settings.preallocateStorage ? lt::storage_mode_allocate : lt::storage_mode_sparse;
 
+    // Inject default trackers for improved peer discovery (matching hayase ANNOUNCE list)
+    if (_defaultTrackers != nil) {
+        for (NSString *trackerUrl in _defaultTrackers) {
+            params.trackers.push_back(trackerUrl.UTF8String);
+        }
+    }
+
     try {
         auto th = _session->add_torrent(params);
         auto torrentHandle = [[TorrentHandle alloc] initWith:th inSession:self];
@@ -235,7 +240,7 @@ std::unordered_map<lt::sha1_hash, std::unordered_map<std::string, std::unordered
 
 // MARK: - Alerts Loop
 
-#define ALERTS_LOOP_WAIT_MILLIS 500
+#define ALERTS_LOOP_WAIT_MILLIS 250
 
 - (void)alertsLoop {
     auto max_wait = lt::milliseconds(ALERTS_LOOP_WAIT_MILLIS);
@@ -364,7 +369,6 @@ std::unordered_map<lt::sha1_hash, std::unordered_map<std::string, std::unordered
                 NSError *error = [self errorWithCode:ErrorCodeAlertFail message:@"Failed to handle alerts"];
                 NSLog(@"%@", error);
             }
-            [NSThread sleepForTimeInterval:0.1];
         }
     }
 }
@@ -452,7 +456,7 @@ std::unordered_map<lt::sha1_hash, std::unordered_map<std::string, std::unordered
         auto hash = th.info_hash();
         const int protocolVersionNum = 1;
 #endif
-        updatedTrackerStatuses[hash][std::string(alert->tracker_url())][alert->local_endpoint][protocolVersionNum] = numPeers;
+        _updatedTrackerStatuses[hash][std::string(alert->tracker_url())][alert->local_endpoint][protocolVersionNum] = numPeers;
     }
 }
 
@@ -650,8 +654,8 @@ std::unordered_map<lt::sha1_hash, std::unordered_map<std::string, std::unordered
     if (error) { NSLog(@"%@", error); }
 }
 
-- (std::unordered_map<lt::sha1_hash, std::unordered_map<std::string, std::unordered_map<lt::tcp::endpoint, std::unordered_map<int, int>>>>)updatedTrackerStatuses {
-    return updatedTrackerStatuses;
+- (std::unordered_map<lt::sha1_hash, std::unordered_map<std::string, std::unordered_map<lt::tcp::endpoint, std::unordered_map<int, int>>>>&)updatedTrackerStatuses {
+    return _updatedTrackerStatuses;
 }
 
 @end

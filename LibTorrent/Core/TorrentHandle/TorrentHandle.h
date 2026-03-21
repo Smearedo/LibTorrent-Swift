@@ -10,6 +10,7 @@
 #import <LibTorrent/TorrentHandleState.h>
 #import <LibTorrent/TorrentTracker.h>
 #import <LibTorrent/FileEntry.h>
+#import <LibTorrent/PeerInfo.h>
 
 NS_ASSUME_NONNULL_BEGIN
 
@@ -67,6 +68,13 @@ NS_SWIFT_NAME(TorrentHandle.Snapshot)
 @property (readonly, nullable) NSUUID* storageUUID;
 @property (readonly) BOOL isStorageMissing;
 @property (readonly) int pieceLength;
+@property (readonly) NSInteger numberOfPieces;
+@property (readonly) NSInteger timeRemaining;
+@property (readonly) NSUInteger numberOfConnectedPeers;
+@property (readonly) BOOL isDhtRunning;
+@property (readonly) BOOL isLsdRunning;
+@property (readonly) BOOL isPexEnabled;
+@property (readonly) BOOL hasIncomingConnections;
 @end
 
 @interface TorrentHandle : NSObject
@@ -101,6 +109,19 @@ NS_SWIFT_NAME(TorrentHandle.Snapshot)
 - (void)removeTrackers:(NSArray<NSString *> *)urls;
 - (void)forceReannounce;
 - (void)forceReannounce:(int)index;
+
+- (NSArray<PeerInfo *> *)peerInfo;
+
+/// Prepare a file for streaming: enables sequential download, sets the file priority to top,
+/// and aggressively prioritizes the first pieces near the beginning of the file for fast playback start.
+- (void)prepareForStreaming:(NSInteger)fileIndex;
+
+/// Set a sliding window of high-priority pieces with tight deadlines near the given byte offset
+/// within the specified file, for responsive streaming. Call this as the playback position advances.
+- (void)setStreamingPiecePriorities:(NSInteger)fileIndex offset:(uint64_t)byteOffset;
+
+/// Reset all piece priorities and deadlines to normal (call when streaming ends).
+- (void)clearStreamingPriorities;
 
 - (void)updateSnapshot;
 @end
