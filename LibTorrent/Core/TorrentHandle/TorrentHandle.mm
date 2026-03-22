@@ -613,9 +613,12 @@
     }
 
     // Aggressively prioritize initial pieces for fast playback start
-    // Use a "head window" of pieces with tight deadlines
-    const int headWindow = std::min(totalFilePieces, std::max(16, (int)(2 * 1024 * 1024 / pieceLength))); // At least 2MB worth
-    const int tailWindow = std::min(4, totalFilePieces); // Last few pieces for container metadata (mp4 moov atom etc)
+    // Use a larger "head window" to build a sufficient initial buffer
+    const int headWindow = std::min(totalFilePieces, std::max(32, (int)(4 * 1024 * 1024 / pieceLength))); // At least 4MB worth
+    const int tailWindow = std::min(8, totalFilePieces); // Last pieces for container metadata (mp4 moov atom etc)
+
+    // First few pieces are critical for playback start - tightest deadlines
+    const int criticalPieces = std::min(4, headWindow);
 
     for (int p = firstPiece; p <= lastPiece; p++) {
         auto idx = static_cast<lt::piece_index_t>(p);
@@ -624,11 +627,17 @@
         if (relPiece < headWindow) {
             // Head pieces: highest priority with tight deadline
             _torrentHandle.piece_priority(idx, lt::download_priority_t{7});
-            _torrentHandle.set_piece_deadline(idx, relPiece * 10); // 10ms between each piece deadline
+            if (relPiece < criticalPieces) {
+                // Critical pieces for immediate playback: tightest deadlines
+                _torrentHandle.set_piece_deadline(idx, relPiece * 10);
+            } else {
+                _torrentHandle.set_piece_deadline(idx, criticalPieces * 10 + (relPiece - criticalPieces) * 50);
+            }
         } else if (relPiece >= totalFilePieces - tailWindow) {
             // Tail pieces: high priority for container metadata
             _torrentHandle.piece_priority(idx, lt::download_priority_t{7});
-            _torrentHandle.set_piece_deadline(idx, headWindow * 10 + (relPiece - (totalFilePieces - tailWindow)) * 10);
+            int tailBase = criticalPieces * 10 + (headWindow - criticalPieces) * 50;
+            _torrentHandle.set_piece_deadline(idx, tailBase + (relPiece - (totalFilePieces - tailWindow)) * 50);
         } else {
             // Middle pieces: normal priority, sequential will handle order
             _torrentHandle.piece_priority(idx, lt::download_priority_t{4});
@@ -665,20 +674,27 @@
     if (currentPiece < firstPiece || currentPiece > lastPiece) return;
 
     // Sliding window: prioritize pieces ahead of the playback position
-    // Window size: enough for ~5 seconds of buffering at typical video bitrates
-    const int windowSize = std::min(lastPiece - currentPiece + 1, std::max(32, (int)(8 * 1024 * 1024 / pieceLength))); // At least 8MB ahead
+    // Larger window for poorly seeded torrents to build sufficient buffer
+    const int windowSize = std::min(lastPiece - currentPiece + 1, std::max(40, (int)(16 * 1024 * 1024 / pieceLength))); // At least 16MB ahead
+
+    // Critical zone: first few pieces needed for immediate playback continuity
+    const int criticalZone = std::min(8, windowSize);
 
     // Also keep tail pieces prioritized for container metadata
-    const int tailWindow = std::min(4, lastPiece - firstPiece + 1);
+    const int tailWindow = std::min(8, lastPiece - firstPiece + 1);
 
     for (int p = firstPiece; p <= lastPiece; p++) {
         auto idx = static_cast<lt::piece_index_t>(p);
         int aheadOfCurrent = p - currentPiece;
 
-        if (aheadOfCurrent >= 0 && aheadOfCurrent < windowSize) {
-            // Pieces in the streaming window: highest priority with tight deadlines
+        if (aheadOfCurrent >= 0 && aheadOfCurrent < criticalZone) {
+            // Critical pieces for immediate playback: tightest deadlines
             _torrentHandle.piece_priority(idx, lt::download_priority_t{7});
-            _torrentHandle.set_piece_deadline(idx, aheadOfCurrent * 20); // 20ms increments
+            _torrentHandle.set_piece_deadline(idx, aheadOfCurrent * 50);
+        } else if (aheadOfCurrent >= criticalZone && aheadOfCurrent < windowSize) {
+            // Buffer zone pieces: high priority with wider deadlines
+            _torrentHandle.piece_priority(idx, lt::download_priority_t{7});
+            _torrentHandle.set_piece_deadline(idx, criticalZone * 50 + (aheadOfCurrent - criticalZone) * 100);
         } else if (p > lastPiece - tailWindow) {
             // Keep tail pieces at high priority
             _torrentHandle.piece_priority(idx, lt::download_priority_t{6});

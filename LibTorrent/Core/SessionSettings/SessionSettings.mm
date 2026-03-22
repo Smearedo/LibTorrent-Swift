@@ -139,6 +139,53 @@ lt::settings_pack::proxy_type_t proxyTypeConverter(SessionSettings *pack) {
 
         // Faster initial peer connections
         settings.set_int(lt::settings_pack::connection_speed, 200);  // default is 30, connect to more peers quickly
+
+        // Allow multiple connections from the same IP address.
+        // Critical for low-seed swarms where seeds may share IPs behind NAT/VPN.
+        settings.set_bool(lt::settings_pack::allow_multiple_connections_per_ip, true);
+
+        // Strict end-game mode: request remaining blocks from all peers simultaneously,
+        // cancelling duplicates as soon as one peer delivers. Faster piece completion.
+        settings.set_bool(lt::settings_pack::strict_end_game_mode, true);
+
+        // Prefer TCP over uTP for more reliable streaming throughput
+        settings.set_int(lt::settings_pack::mixed_mode_algorithm, lt::settings_pack::prefer_tcp);
+
+        // Skip the random initial piece selection phase. Use deadline/rarest-first
+        // picker immediately, which is essential for streaming piece prioritization.
+        settings.set_int(lt::settings_pack::initial_picker_threshold, 0);
+
+        // Connect to many peers immediately when a torrent starts (default ~10).
+        // With only 10-15 seeds, we need to reach all of them as fast as possible.
+        settings.set_int(lt::settings_pack::torrent_connect_boost, 100);
+
+        // Disable rate-limiting of outgoing connection attempts so we connect to
+        // all available peers at once rather than trickling connections over time.
+        settings.set_bool(lt::settings_pack::smooth_connects, false);
+
+        // Retry failed peers more quickly (default 60s)
+        settings.set_int(lt::settings_pack::min_reconnect_time, 5);
+
+        // Don't give up on peers too quickly (default 3). In low-seed swarms
+        // every peer is valuable and worth retrying.
+        settings.set_int(lt::settings_pack::max_failcount, 7);
+
+        // Allow more pending requests per peer for better pipeline utilization
+        settings.set_int(lt::settings_pack::max_allowed_in_request_queue, 1000);
+
+        // Suggest pieces already in disk cache to peers, reducing redundant disk reads
+        settings.set_int(lt::settings_pack::suggest_mode, lt::settings_pack::suggest_read_cache);
+
+        // Keep all peer connections open even if they appear redundant.
+        // In low-seed swarms every connection is valuable.
+        settings.set_bool(lt::settings_pack::close_redundant_connections, false);
+
+        // Allow connecting to privileged ports (some seeds may use them)
+        settings.set_bool(lt::settings_pack::no_connect_privileged_ports, false);
+
+        // Use fastest-upload choking algorithm for seeds so they send to us at
+        // maximum rate rather than round-robin across all leechers.
+        settings.set_int(lt::settings_pack::seed_choking_algorithm, lt::settings_pack::fastest_upload);
     }
 
     return settings;
